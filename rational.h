@@ -1,64 +1,79 @@
+/* rational.h - TRTS Rational Number Type
+ *
+ * Implements strictly rational arithmetic with the following invariants:
+ * 1. No canonicalization - numerators and denominators are never reduced
+ * 2. No GCD operations - fractions remain in their original form
+ * 3. Zero numerators force zero denominators (0/0 representation)
+ * 4. All arithmetic preserves these properties
+ */
+
 #ifndef TRTS_RATIONAL_H
 #define TRTS_RATIONAL_H
 
 #include <gmp.h>
+#include <stdbool.h>
 
-/*
- * TRTS rational number type.
- * A rational is represented by a pair of integers (num, den) stored in mpz_t.
- * Zero numerators force the denominator to zero (0/0).  Denominator zero
- * represents ∞ or undefined but is preserved through operations.  No
- * canonicalisation or GCD reduction is performed; numerators and denominators
- * may grow large.  All functions avoid mpq_t and avoid any call that
- * normalises fractions.
+/* TRTS Rational number represented as separate numerator and denominator.
+ * Zero-based counting: a rational with numerator 0 must have denominator 0.
+ * This represents the undefined/counting state (0/0).
  */
-
 typedef struct {
-    mpz_t num;
-    mpz_t den;
+    mpz_t num;  /* numerator */
+    mpz_t den;  /* denominator */
 } Rational;
 
-/* Initialise a rational to 0/1. */
+/* Initialize rational to 0/1 */
 void rational_init(Rational *q);
 
-/* Clear a rational’s internal mpz values. */
+/* Clear rational's GMP resources */
 void rational_clear(Rational *q);
 
-/* Set q ← src. */
+/* Copy src to q */
 void rational_set(Rational *q, const Rational *src);
 
-/* Set q ← n/d. */
+/* Set q = n/d with signed numerator and unsigned denominator
+ * If n == 0, forces denominator to 0 (0/0 invariant) */
 void rational_set_si(Rational *q, long n, unsigned long d);
 
-/* Set q ← (num, den) using existing mpz_t values (they are copied). */
+/* Set q from existing mpz_t components (copies values)
+ * Enforces 0/0 invariant if num is zero */
 void rational_set_components(Rational *q, const mpz_t num, const mpz_t den);
 
-/* Addition: r ← a + b. */
+/* Arithmetic operations - all preserve non-canonicalized form */
 void rational_add(Rational *r, const Rational *a, const Rational *b);
-
-/* Subtraction: r ← a – b. */
 void rational_sub(Rational *r, const Rational *a, const Rational *b);
-
-/* Multiplication: r ← a × b. */
 void rational_mul(Rational *r, const Rational *a, const Rational *b);
 
-/* Division: r ← a ÷ b.  If b.num = 0, r is unchanged and returns false. */
+/* Division: r = a/b. Returns false if b.num == 0 */
 bool rational_div(Rational *r, const Rational *a, const Rational *b);
 
-/* Negation: q ← –q. */
+/* Negate q (flip sign of numerator) */
 void rational_negate(Rational *q);
 
-/* Absolute value: q ← |q|.  Both numerator and denominator become non‑negative. */
+/* Absolute value (both num and den become non-negative) */
 void rational_abs(Rational *q);
 
-/* Copy numerator into mpz dest. */
-void rational_copy_num(mpz_t dest, const Rational *q);
+/* Modular operations */
+void rational_mod(Rational *r, const Rational *a, const Rational *b);
+void rational_delta(Rational *r, const Rational *a, const Rational *b);
+void rational_floor(Rational *r, const Rational *q);
+void rational_ceil(Rational *r, const Rational *q);
+void rational_round(Rational *r, const Rational *q);
 
-/* Return true if numerator is zero (denominator must then be zero). */
-bool rational_is_zero(const Rational *q);
+/* Copy absolute value of numerator to dest */
+void rational_abs_num(mpz_t dest, const Rational *q);
 
-/* Compare two rationals without reducing.  Return <0,0,>0 if a<b, a=b, a>b. */
+/* Comparison: returns <0 if a<b, 0 if a==b, >0 if a>b
+ * Compares using cross-multiplication without reduction */
 int rational_cmp(const Rational *a, const Rational *b);
 
-#endif /* TRTS_RATIONAL_H */
+/* Sign of rational (-1, 0, or 1) */
+int rational_sgn(const Rational *q);
 
+/* Test if numerator is zero (which implies denominator is also zero) */
+bool rational_is_zero(const Rational *q);
+
+/* Test if denominator is zero (undefined state) */
+bool rational_denominator_zero(const Rational *q);
+
+#endif /* TRTS_RATIONAL_H */
