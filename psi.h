@@ -1,24 +1,14 @@
-// psi.h
-#ifndef PSI_H
-#define PSI_H
+#ifndef TRTS_PSI_H
+#define TRTS_PSI_H
 
-#include <stdbool.h>
-#include <gmp.h>
 #include "config.h"
 #include "state.h"
+#include <stdbool.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+/* Execute the psi transform if conditions allow.  Returns true if a transform
+ * was applied.  Updates state->upsilon/beta/koppa and clears rho_pending on
+ * the first successful fire. */
+bool psi_transform(const Config *cfg, TRTS_State *st);
 
-/**
- * Attempts to execute a psi transform on the given state.
- * Returns true if the transform succeeded, false otherwise.
- */
-bool psi_transform(const Config *config, TRTS_State *state);
+#endif /* TRTS_PSI_H */
 
-#ifdef __cplusplus
-}
-#endif
-
-#endif // PSI_H

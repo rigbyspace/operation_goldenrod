@@ -1,52 +1,50 @@
-// state.h
-/*
-==============================================
-     TRTS SYSTEM CREED – RATIONAL ONLY
-==============================================
-*/
+#ifndef TRTS_STATE_H
+#define TRTS_STATE_H
 
-#ifndef STATE_H
-#define STATE_H
-
-#include "stdio.h"
-#include <gmp.h>
+#include "rational.h"
+#include "config.h"
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "config.h"
-
+/* TRTS runtime state. */
 typedef struct {
-    mpq_t upsilon;
-    mpq_t beta;
-    mpq_t koppa;
-    mpq_t epsilon;
-    mpq_t phi;
-    mpq_t previous_upsilon;
-    mpq_t previous_beta;
-    mpq_t delta_upsilon;
-    mpq_t delta_beta;
-    mpq_t triangle_phi_over_epsilon;
-    mpq_t triangle_prev_over_phi;
-    mpq_t triangle_epsilon_over_prev;
-    mpq_t koppa_stack[4];
+    /* primary registers */
+    Rational upsilon;
+    Rational beta;
+    Rational koppa;
+    /* supplementary registers */
+    Rational epsilon;
+    Rational phi;
+    Rational previous_upsilon;
+    Rational previous_beta;
+    Rational delta_upsilon;
+    Rational delta_beta;
+    /* triangles */
+    Rational triangle_phi_over_epsilon;
+    Rational triangle_prev_over_phi;
+    Rational triangle_epsilon_over_prev;
+    /* koppa stack */
+    Rational koppa_stack[4];
     size_t koppa_stack_size;
-    mpq_t koppa_sample;
+    Rational koppa_sample;
     int koppa_sample_index;
+    /* flags */
     bool rho_pending;
     bool rho_latched;
     bool psi_recent;
-    bool ratio_triggered_recent;
     bool psi_triple_recent;
-    bool dual_engine_last_step;
-    bool ratio_threshold_recent;
     bool psi_strength_applied;
+    bool ratio_triggered_recent;
+    bool ratio_threshold_recent;
+    bool dual_engine_last_step;
     bool sign_flip_polarity;
+    /* current tick */
     size_t tick;
 } TRTS_State;
 
-void state_init(TRTS_State *state);
-void state_clear(TRTS_State *state);
-void state_reset(TRTS_State *state, const Config *config);
+void state_init(TRTS_State *st);
+void state_clear(TRTS_State *st);
+void state_reset(TRTS_State *st, const Config *cfg);
 
-#endif // STATE_H
+#endif /* TRTS_STATE_H */
 

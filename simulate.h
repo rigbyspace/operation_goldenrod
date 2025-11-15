@@ -34,3 +34,4 @@ void simulate_stream(const Config *config, SimulateObserver observer, void *user
 #endif
 
 #endif // SIMULATE_H
+

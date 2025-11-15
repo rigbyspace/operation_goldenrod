@@ -333,3 +333,4 @@ bool engine_step(const Config *config, TRTS_State *state, int microtick) {
     rational_clear(new_beta);
     return success;
 }
+

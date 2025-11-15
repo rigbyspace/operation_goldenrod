@@ -1,23 +1,15 @@
-// engine.h
-#ifndef ENGINE_H
-#define ENGINE_H
+#ifndef TRTS_ENGINE_H
+#define TRTS_ENGINE_H
 
-#include <stdbool.h>
 #include "config.h"
 #include "state.h"
+#include <stdbool.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+/* Perform a single engine update for the given microtick (1–11).
+ * Returns true on success, false if a division by zero or invalid
+ * operation occurred.  Updates upsilon and beta, deltas, triangles
+ * and sign‑flip/polarity flags. */
+bool engine_step(const Config *cfg, TRTS_State *st, int microtick);
 
-/**
- * Executes a single engine step for the given microtick.
- * Returns true if the step succeeded, false on error (e.g., division by zero).
- */
-bool engine_step(const Config *config, TRTS_State *state, int microtick);
+#endif /* TRTS_ENGINE_H */
 
-#ifdef __cplusplus
-}
-#endif
-
-#endif // ENGINE_H

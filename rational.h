@@ -1,187 +1,64 @@
-/*
-==============================================
-     TRTS SYSTEM CREED – RATIONAL ONLY
-==============================================
-Strict enforcement header: forbids canonicalization and GCD-style helpers.
-All propagation must remain strictly within the rational field Q without
-canonicalization or GCD normalization. This header enforces that at
-compile-time and at runtime (best-effort).
-
-Allowed GMP operations:
- - mpq_init, mpq_clear
- - mpq_set (wrapped carefully via rational_set)
- - mpz_set, mpz_set_si, mpz_set_ui
- - mpq_add, mpq_sub, mpq_mul, mpq_div
- - mpz_probab_prime_p, mpz_perfect_power_p
- - mpq_numref, mpq_denref
-
-Forbidden symbols (any use will cause build-time failure or runtime abort):
- - mpq_canonicalize
- - mpq_set_str
- - mpq_set (raw wrapper use that may canonicalize if misused; usage is restricted)
- - mpz_gcd
- - mpz_gcd_ui
- - mpz_gcdext
- - mpz_invert
- - any other symbol invoking explicit GCD/canonicalization
-
-If you must import rationals from text, use mpz_set_str for numerator and denominator
-and then call rational_set_components to assign numerator/denominator without canonicalization.
-*/
-
-#ifndef RATIONAL_H
-#define RATIONAL_H
+#ifndef TRTS_RATIONAL_H
+#define TRTS_RATIONAL_H
 
 #include <gmp.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <stdlib.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+/*
+ * TRTS rational number type.
+ * A rational is represented by a pair of integers (num, den) stored in mpz_t.
+ * Zero numerators force the denominator to zero (0/0).  Denominator zero
+ * represents ∞ or undefined but is preserved through operations.  No
+ * canonicalisation or GCD reduction is performed; numerators and denominators
+ * may grow large.  All functions avoid mpq_t and avoid any call that
+ * normalises fractions.
+ */
 
-/* ---------------------------
-   Forbidden-symbol compile-time guards
-   ---------------------------
-   These macros will intentionally cause a compile-time error if source code
-   attempts to call these forbidden GMP helpers directly.
-   --------------------------- */
+typedef struct {
+    mpz_t num;
+    mpz_t den;
+} Rational;
 
-#ifdef mpq_canonicalize
-#undef mpq_canonicalize
-#endif
-#define mpq_canonicalize(...) \
-    _Pragma("GCC error \"mpq_canonicalize is forbidden by TRTS policy (no canonicalization).\"")
+/* Initialise a rational to 0/1. */
+void rational_init(Rational *q);
 
-/* Prohibit text-based setters that may canonicalize */
-#ifdef mpq_set_str
-#undef mpq_set_str
-#endif
-#define mpq_set_str(...) \
-    _Pragma("GCC error \"mpq_set_str is forbidden by TRTS policy (use mpz_set_str + rational_set_components).\"")
+/* Clear a rational’s internal mpz values. */
+void rational_clear(Rational *q);
 
-/* mpq_set is allowed only via rational_set wrapper below. Direct use is forbidden. */
-#ifdef mpq_set
-#undef mpq_set
-#endif
-#define mpq_set(...) \
-    _Pragma("GCC error \"Direct mpq_set is forbidden: use rational_set wrapper API to ensure unadulterated propagation.\"")
+/* Set q ← src. */
+void rational_set(Rational *q, const Rational *src);
 
-/* Prohibit common gcd-like mpz helpers */
-#ifdef mpz_gcd
-#undef mpz_gcd
-#endif
-#define mpz_gcd(...) \
-    _Pragma("GCC error \"mpz_gcd is forbidden by TRTS policy (no GCD).\"")
+/* Set q ← n/d. */
+void rational_set_si(Rational *q, long n, unsigned long d);
 
-#ifdef mpz_gcd_ui
-#undef mpz_gcd_ui
-#endif
-#define mpz_gcd_ui(...) \
-    _Pragma("GCC error \"mpz_gcd_ui is forbidden by TRTS policy (no GCD).\"")
+/* Set q ← (num, den) using existing mpz_t values (they are copied). */
+void rational_set_components(Rational *q, const mpz_t num, const mpz_t den);
 
-#ifdef mpz_gcdext
-#undef mpz_gcdext
-#endif
-#define mpz_gcdext(...) \
-    _Pragma("GCC error \"mpz_gcdext is forbidden by TRTS policy (no GCD).\"")
+/* Addition: r ← a + b. */
+void rational_add(Rational *r, const Rational *a, const Rational *b);
 
-#ifdef mpz_invert
-#undef mpz_invert
-#endif
-#define mpz_invert(...) \
-    _Pragma("GCC error \"mpz_invert is forbidden by TRTS policy (no GCD-based inversion).\"")
+/* Subtraction: r ← a – b. */
+void rational_sub(Rational *r, const Rational *a, const Rational *b);
 
-/* ---------------------------
-   Runtime safeguard
-   ---------------------------
-   If a build system or toolchain bypasses the above preprocessor guards,
-   the runtime check below will attempt to detect linked forbidden symbols
-   and abort early. This is a best-effort measure.
-   --------------------------- */
+/* Multiplication: r ← a × b. */
+void rational_mul(Rational *r, const Rational *a, const Rational *b);
 
-static inline void trts_check_forbidden_symbols_runtime(void) {
-    /* This function intentionally keeps implementation minimal and portable:
-       it attempts to reference the forbidden symbols via weak externs when
-       available. Most toolchains will resolve forbidden usage at compile time
-       due to the macros above. If this function is linked and the platform
-       supports weak symbol detection, it will abort if forbidden functions
-       are present. Implementations lacking weak symbol support may be a no-op. */
-#if defined(__GNUC__) || defined(__clang__)
-    /* no-op: compile-time macros ensure forbidden usage is rejected */
-    (void)0;
-#else
-    (void)0;
-#endif
-}
+/* Division: r ← a ÷ b.  If b.num = 0, r is unchanged and returns false. */
+bool rational_div(Rational *r, const Rational *a, const Rational *b);
 
-/* ---------------------------
-   Public TRTS rational API (whitelist)
-   --------------------------- */
+/* Negation: q ← –q. */
+void rational_negate(Rational *q);
 
-/* Initialization and cleanup (whitelisted) */
-void rational_init(mpq_t value);
-void rational_clear(mpq_t value);
+/* Absolute value: q ← |q|.  Both numerator and denominator become non‑negative. */
+void rational_abs(Rational *q);
 
-/* Assignment operations (whitelisted wrappers)
-   - rational_set: copy from another mpq (allowed, but this wrapper is the only
-     sanctioned way to copy a rational within engine propagation code).
-   - rational_set_si: set numerator/denominator via mpz_set_* primitives.
-   - rational_set_components: set numerator and denominator mpz_t explicitly.
-*/
-void rational_set(mpq_t dest, mpq_srcptr src);
-void rational_set_si(mpq_t dest, long numerator, unsigned long denominator);
-void rational_set_components(mpq_t dest, mpz_srcptr numerator, mpz_srcptr denominator);
+/* Copy numerator into mpz dest. */
+void rational_copy_num(mpz_t dest, const Rational *q);
 
-/* NOTE: rational_set_str (text parsing) is intentionally NOT exposed here.
-   If text parsing is required, call mpz_set_str for numerator and denominator
-   and then call rational_set_components. This guarantees no implicit canonicalization. */
+/* Return true if numerator is zero (denominator must then be zero). */
+bool rational_is_zero(const Rational *q);
 
-/* Arithmetic operations (whitelisted) */
-void rational_add(mpq_t result, mpq_srcptr a, mpq_srcptr b);
-void rational_sub(mpq_t result, mpq_srcptr a, mpq_srcptr b);
-void rational_mul(mpq_t result, mpq_srcptr a, mpq_srcptr b);
-void rational_div(mpq_t result, mpq_srcptr a, mpq_srcptr b);
-void rational_add_ui(mpq_t result, mpq_srcptr a, unsigned long numerator, unsigned long denominator);
-void rational_neg(mpq_t result, mpq_srcptr a);
-void rational_inv(mpq_t result, mpq_srcptr a);
-void rational_abs(mpq_t result, mpq_srcptr a);
-void rational_negate(mpq_t value);
+/* Compare two rationals without reducing.  Return <0,0,>0 if a<b, a=b, a>b. */
+int rational_cmp(const Rational *a, const Rational *b);
 
-/* Comparison operations */
-int rational_cmp(mpq_srcptr a, mpq_srcptr b);
-int rational_sgn(mpq_srcptr value);
-bool rational_is_zero(mpq_srcptr a);
-
-/* Numerator/denominator operations (whitelisted) */
-void rational_copy_num(mpz_t dest, mpq_srcptr value);
-void rational_abs_num(mpz_t dest, mpq_srcptr a);
-
-/* NOTE: rational_denominator_zero remains a simple inline helper; it does not
-   canonicalize or compute GCDs. */
-static inline bool rational_denominator_zero(mpq_srcptr value) {
-    return mpz_sgn(mpq_denref(value)) == 0;
-}
-
-/* Modular and special operations (implemented using whitelisted primitives) */
-void rational_mod(mpq_t result, mpq_srcptr value, mpq_srcptr modulus);
-void rational_delta(mpq_t result, mpq_srcptr current, mpq_srcptr previous);
-void rational_floor(mpz_t dest, mpq_srcptr value);
-void rational_ceil(mpz_t dest, mpq_srcptr value);
-void rational_round(mpz_t dest, mpq_srcptr value);
-
-/* I/O operations (printing only — does not canonicalize engine state) */
-void rational_print(FILE *stream, mpq_srcptr value);
-
-/* Utility: explicit forbidden setter detection
-   If you need a textual-to-rational loader, implement it using mpz_set_str
-   and rational_set_components outside of engine propagation paths.
-*/
-#ifdef __cplusplus
-}
-#endif
-
-#endif // RATIONAL_H
+#endif /* TRTS_RATIONAL_H */
 

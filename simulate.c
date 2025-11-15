@@ -467,3 +467,4 @@ void simulate(const Config *config) {
 void simulate_stream(const Config *config, SimulateObserver observer, void *user_data) {
     run_simulation(config, NULL, observer, user_data);
 }
+
