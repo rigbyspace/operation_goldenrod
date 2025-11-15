@@ -4,7 +4,7 @@
 # and deterministic propagation logic.
 
 CC = gcc
-CFLAGS = -Wall -Wextra -O2 -std=c99 -pedantic
+CFLAGS = -Wall -Wextra -std=c99 -pedantic
 LDFLAGS = -lgmp -lm
 
 # Core library sources

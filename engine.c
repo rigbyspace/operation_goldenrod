@@ -1,361 +1,556 @@
-/* engine.c - TRTS Engine Implementation
+/* simulate.c - TRTS Simulation Implementation
  *
- * Core propagation engine with all modulation features.
- * Maintains strict rational arithmetic throughout.
+ * Complete simulation loop with pattern detection and ratio triggers.
+ * All evaluation happens outside propagation - propagation is never altered.
  */
 
+#include "simulate.h"
 #include "engine.h"
+#include "koppa.h"
+#include "psi.h"
 #include "rational.h"
+#include <stdio.h>
+#include <stdlib.h>
 #include <gmp.h>
 
-/* Convert EngineMode to EngineTrackMode */
-static EngineTrackMode convert_engine_mode(EngineMode mode) {
-    switch (mode) {
-        case ENGINE_MODE_ADD:
-            return ENGINE_TRACK_ADD;
-        case ENGINE_MODE_MULTI:
-            return ENGINE_TRACK_MULTI;
-        case ENGINE_MODE_SLIDE:
-            return ENGINE_TRACK_SLIDE;
-        case ENGINE_MODE_DELTA_ADD:
-        default:
-            return ENGINE_TRACK_ADD;
-    }
-}
+/* ========================================
+   PATTERN DETECTION (EVALUATION ONLY)
+   ======================================== */
 
-/* Apply asymmetric cascade: different track modes per microtick */
-static void apply_asymmetric_modes(const Config *config, int microtick,
-                                    EngineTrackMode *ups_mode,
-                                    EngineTrackMode *beta_mode) {
-    if (!config->enable_asymmetric_cascade) {
-        return;
-    }
-    
-    switch (microtick) {
-        case 1:
-            *ups_mode = ENGINE_TRACK_MULTI;
-            *beta_mode = ENGINE_TRACK_ADD;
-            break;
-        case 4:
-            *ups_mode = ENGINE_TRACK_ADD;
-            *beta_mode = ENGINE_TRACK_SLIDE;
-            break;
-        case 7:
-            *ups_mode = ENGINE_TRACK_SLIDE;
-            *beta_mode = ENGINE_TRACK_MULTI;
-            break;
-        case 10:
-            *ups_mode = ENGINE_TRACK_ADD;
-            *beta_mode = ENGINE_TRACK_ADD;
-            break;
-        default:
-            break;
-    }
-}
-
-/* Modulate track mode based on stack depth */
-static EngineTrackMode apply_stack_depth_mode(const Config *config,
-                                               const TRTS_State *state,
-                                               EngineTrackMode base_mode) {
-    if (!config->enable_stack_depth_modes) {
-        return base_mode;
-    }
-    
-    size_t depth = state->koppa_stack_size;
-    if (depth <= 1) {
-        return ENGINE_TRACK_ADD;
-    }
-    if (depth <= 3) {
-        return ENGINE_TRACK_MULTI;
-    }
-    if (depth == 4) {
-        return ENGINE_TRACK_SLIDE;
-    }
-    return ENGINE_TRACK_ADD;
-}
-
-/* Modulate track mode based on koppa magnitude */
-static EngineTrackMode apply_koppa_gate(const Config *config,
-                                        const TRTS_State *state,
-                                        EngineTrackMode base_mode) {
-    if (!config->enable_koppa_gated_engine) {
-        return base_mode;
-    }
-    
+/* Check if mpz_t is prime (using absolute value) */
+static bool mpz_is_prime_signed(mpz_srcptr value) {
     mpz_t magnitude;
     mpz_init(magnitude);
-    rational_abs_num(magnitude, &state->koppa);
+    mpz_abs(magnitude, value);
     
-    EngineTrackMode result;
-    if (mpz_cmp_ui(magnitude, 10UL) < 0) {
-        result = ENGINE_TRACK_SLIDE;
-    } else if (mpz_cmp_ui(magnitude, 100UL) < 0) {
-        result = ENGINE_TRACK_MULTI;
-    } else {
-        result = ENGINE_TRACK_ADD;
+    bool is_prime = false;
+    if (mpz_cmp_ui(magnitude, 2UL) >= 0) {
+        is_prime = mpz_probab_prime_p(magnitude, 25) > 0;
     }
     
     mpz_clear(magnitude);
+    return is_prime;
+}
+
+/* Check if value is perfect square */
+static bool mpz_is_square(mpz_srcptr value) {
+    if (mpz_sgn(value) < 0) {
+        return false;
+    }
+    
+    mpz_t root;
+    mpz_init(root);
+    mpz_sqrt(root, value);
+    mpz_mul(root, root, root);
+    bool result = (mpz_cmp(root, value) == 0);
+    mpz_clear(root);
     return result;
 }
 
-/* Apply track mode formula to compute new value */
-static bool apply_track_mode(EngineTrackMode mode, Rational *result,
-                              const Rational *current, const Rational *counterpart,
-                              const Rational *koppa) {
-    Rational workspace;
-    rational_init(&workspace);
-    bool ok = true;
-    
-    switch (mode) {
-        case ENGINE_TRACK_ADD:
-            /* result = current + counterpart + koppa */
-            rational_add(result, current, counterpart);
-            rational_add(result, result, koppa);
-            break;
-            
-        case ENGINE_TRACK_MULTI:
-            /* result = current * (counterpart + koppa) */
-            rational_add(&workspace, counterpart, koppa);
-            rational_mul(result, current, &workspace);
-            break;
-            
-        case ENGINE_TRACK_SLIDE:
-            /* result = (current + counterpart) / koppa */
-            if (rational_is_zero(koppa) || rational_denominator_zero(koppa)) {
-                ok = false;
-            } else {
-                rational_add(&workspace, current, counterpart);
-                if (rational_denominator_zero(&workspace)) {
-                    ok = false;
-                } else {
-                    ok = rational_div(result, &workspace, koppa);
-                }
-            }
-            break;
+/* Check if value is Fibonacci number */
+static bool mpz_is_fibonacci(mpz_srcptr value) {
+    if (mpz_cmp_ui(value, 0UL) < 0) {
+        return false;
+    }
+    if (mpz_cmp_ui(value, 1UL) <= 0) {
+        return true;
     }
     
-    rational_clear(&workspace);
-    return ok;
+    mpz_t test1, test2, temp;
+    mpz_init(test1);
+    mpz_init(test2);
+    mpz_init(temp);
+    
+    /* n is Fibonacci iff one of 5n²+4 or 5n²-4 is perfect square */
+    mpz_mul(temp, value, value);
+    mpz_mul_ui(temp, temp, 5UL);
+    
+    mpz_add_ui(test1, temp, 4UL);
+    mpz_sub_ui(test2, temp, 4UL);
+    
+    bool result = mpz_is_square(test1) || mpz_is_square(test2);
+    
+    mpz_clear(test1);
+    mpz_clear(test2);
+    mpz_clear(temp);
+    return result;
 }
 
-/* Apply sign flip to upsilon and beta */
-static void apply_sign_flip(const Config *config, TRTS_State *state,
-                             Rational *upsilon, Rational *beta) {
-    if (!config->enable_sign_flip || config->sign_flip_mode == SIGN_FLIP_NONE) {
-        state->sign_flip_polarity = false;
-        return;
+/* Check if value is perfect power */
+static bool mpz_is_perfect_power(mpz_srcptr value) {
+    if (mpz_cmp_ui(value, 1UL) <= 0) {
+        return false;
     }
-    
-    bool flip_now = false;
-    switch (config->sign_flip_mode) {
-        case SIGN_FLIP_ALWAYS:
-            flip_now = true;
-            break;
-        case SIGN_FLIP_ALTERNATE:
-            flip_now = !state->sign_flip_polarity;
-            break;
-        case SIGN_FLIP_NONE:
-        default:
-            break;
-    }
-    
-    if (flip_now) {
-        rational_negate(upsilon);
-        rational_negate(beta);
-    }
-    
-    /* Update polarity flag */
-    if (config->sign_flip_mode == SIGN_FLIP_ALWAYS) {
-        state->sign_flip_polarity = true;
-    } else if (config->sign_flip_mode == SIGN_FLIP_ALTERNATE) {
-        state->sign_flip_polarity = flip_now;
-    }
+    return mpz_perfect_power_p(value) != 0;
 }
 
-/* Update epsilon-phi triangle ratios */
-static void update_triangle(const Config *config, TRTS_State *state) {
-    if (!config->enable_epsilon_phi_triangle) {
-        return;
-    }
+/* Check if rational has pattern components in numerator and/or denominator */
+/* FIX: Changed signature to use Rational* */
+static bool mpq_has_pattern_component(const Config *config, const Rational *value,
+                                       bool check_num, bool check_den) {
+    bool found = false;
     
-    /* φ/ε */
-    if (!rational_is_zero(&state->epsilon)) {
-        rational_div(&state->triangle_phi_over_epsilon, &state->phi, &state->epsilon);
-    } else {
-        rational_set_si(&state->triangle_phi_over_epsilon, 0, 1);
-    }
-    
-    /* υ_prev/φ */
-    if (!rational_is_zero(&state->phi)) {
-        rational_div(&state->triangle_prev_over_phi, &state->previous_upsilon, &state->phi);
-    } else {
-        rational_set_si(&state->triangle_prev_over_phi, 0, 1);
-    }
-    
-    /* ε/υ_prev */
-    if (!rational_is_zero(&state->previous_upsilon)) {
-        rational_div(&state->triangle_epsilon_over_prev, &state->epsilon, &state->previous_upsilon);
-    } else {
-        rational_set_si(&state->triangle_epsilon_over_prev, 0, 1);
-    }
-}
-
-/* Apply delta cross-propagation */
-static void apply_delta_cross(const Config *config, TRTS_State *state,
-                               Rational *new_upsilon, Rational *new_beta) {
-    if (!config->enable_delta_cross_propagation) {
-        return;
-    }
-    
-    /* Add Δβ to new_upsilon, Δυ to new_beta */
-    rational_add(new_upsilon, new_upsilon, &state->delta_beta);
-    rational_add(new_beta, new_beta, &state->delta_upsilon);
-    
-    /* Optional: add κ offset */
-    if (config->enable_delta_koppa_offset) {
-        rational_add(new_upsilon, new_upsilon, &state->koppa);
-        rational_add(new_beta, new_beta, &state->koppa);
-    }
-}
-
-/* Reduce rational numerator modulo bound (preserving sign) */
-static void rational_mod_bound(Rational *value, const mpz_t bound) {
-    if (mpz_cmp_ui(bound, 0UL) == 0) {
-        return;
-    }
-    
-    mpz_t rem;
-    mpz_init(rem);
-    
-    /* Store sign */
-    int sign = mpz_sgn(mpq_numref(*value));
-    
-    /* Reduce absolute value mod bound */
-    mpz_abs(rem, mpq_numref(*value));
-    mpz_mod(rem, rem, bound);
-    
-    /* Restore sign */
-    if (sign < 0) {
-        mpz_neg(rem, rem);
-    }
-    
-    mpz_set(mpq_numref(*value), rem);
-    mpz_clear(rem);
-}
-
-/* Apply modular wrap operations */
-static void apply_modular_wrap(const Config *config, TRTS_State *state) {
-    if (!config->enable_modular_wrap) {
-        return;
-    }
-    
-    /* Wrap κ modulo β when |κ| exceeds threshold */
-    if (config->koppa_wrap_threshold > 0) {
-        mpz_t magnitude;
-        mpz_init(magnitude);
-        rational_abs_num(magnitude, &state->koppa);
+    if (check_num) {
+        /* FIX: Use .num */
+        mpz_srcptr num = value->num;
         
-        if (mpz_cmp_ui(magnitude, config->koppa_wrap_threshold) > 0) {
-            rational_mod(&state->koppa, &state->koppa, &state->beta);
+        /* Prime check */
+        if (mpz_is_prime_signed(num)) {
+            found = true;
         }
         
-        mpz_clear(magnitude);
+        /* Twin prime check */
+        if (config->enable_twin_prime_trigger && mpz_is_prime_signed(num)) {
+            mpz_t temp;
+            mpz_init(temp);
+            
+            mpz_add_ui(temp, num, 2UL);
+            if (mpz_is_prime_signed(temp)) {
+                found = true;
+            }
+            
+            mpz_sub_ui(temp, num, 2UL);
+            if (mpz_is_prime_signed(temp)) {
+                found = true;
+            }
+            
+            mpz_clear(temp);
+        }
+        
+        /* Fibonacci check */
+        if (config->enable_fibonacci_trigger) {
+            mpz_t abs_num;
+            mpz_init(abs_num);
+            mpz_abs(abs_num, num);
+            if (mpz_is_fibonacci(abs_num)) {
+                found = true;
+            }
+            mpz_clear(abs_num);
+        }
+        
+        /* Perfect power check */
+        if (config->enable_perfect_power_trigger) {
+            mpz_t abs_num;
+            mpz_init(abs_num);
+            mpz_abs(abs_num, num);
+            if (mpz_is_perfect_power(abs_num)) {
+                found = true;
+            }
+            mpz_clear(abs_num);
+        }
     }
     
-    /* Reduce numerators by modulus_bound if set */
-    if (mpz_cmp_ui(config->modulus_bound, 0UL) > 0) {
-        rational_mod_bound(&state->upsilon, config->modulus_bound);
-        rational_mod_bound(&state->beta, config->modulus_bound);
-        rational_mod_bound(&state->koppa, config->modulus_bound);
+    if (check_den) {
+        /* FIX: Use .den */
+        mpz_srcptr den = value->den;
+        
+        if (mpz_is_prime_signed(den)) {
+            found = true;
+        }
+        if (config->enable_fibonacci_trigger && mpz_is_fibonacci(den)) {
+            found = true;
+        }
+        if (config->enable_perfect_power_trigger && mpz_is_perfect_power(den)) {
+            found = true;
+        }
+    }
+    
+    return found;
+}
+
+/* ========================================
+   RATIO TRIGGERS (EVALUATION ONLY)
+   ======================================== */
+
+/* Get ratio bounds for specific trigger modes */
+static void ratio_bounds(RatioTriggerMode mode, Rational *lower, Rational *upper) {
+    /* FIX: Replaced undeclared enums with those from config.h */
+    switch (mode) {
+        case RATIO_TRIGGER_PHI: /* Was RATIO_TRIGGER_GOLDEN */
+            rational_set_si(lower, 3, 2);    /* ~1.5 */
+            rational_set_si(upper, 17, 10);  /* ~1.7 */
+            break;
+        case RATIO_TRIGGER_SILVER: /* Was RATIO_TRIGGER_SQRT2, using compiler hint */
+            rational_set_si(lower, 13, 10);  /* ~1.3 */
+            rational_set_si(upper, 3, 2);    /* ~1.5 */
+            break;
+        case RATIO_TRIGGER_RHO: /* Was RATIO_TRIGGER_PLASTIC */
+            rational_set_si(lower, 6, 5);    /* ~1.2 */
+            rational_set_si(upper, 7, 5);    /* ~1.4 */
+            break;
+        case RATIO_TRIGGER_NONE:
+        case RATIO_TRIGGER_CUSTOM:
+        default:
+            rational_set_si(lower, 0, 1);
+            rational_set_si(upper, 0, 1);
+            break;
     }
 }
 
-bool engine_step(const Config *config, TRTS_State *state, int microtick) {
-    /* Store previous values */
-    Rational ups_before, beta_before;
-    rational_init(&ups_before);
-    rational_init(&beta_before);
-    rational_set(&ups_before, &state->upsilon);
-    rational_set(&beta_before, &state->beta);
-    
-    bool success = true;
-    
-    /* Determine track modes */
-    EngineTrackMode ups_mode, beta_mode;
-    if (config->dual_track_mode) {
-        ups_mode = config->engine_upsilon;
-        beta_mode = config->engine_beta;
-    } else {
-        ups_mode = convert_engine_mode(config->engine_mode);
-        beta_mode = ups_mode;
+/* Check if υ/β ratio is within trigger range */
+static bool ratio_in_range(const Config *config, const TRTS_State *state) {
+    if (config->ratio_trigger_mode == RATIO_TRIGGER_NONE) {
+        return false;
+    }
+    if (rational_is_zero(&state->beta)) {
+        return false;
     }
     
-    /* Apply modulations */
-    apply_asymmetric_modes(config, microtick, &ups_mode, &beta_mode);
-    ups_mode = apply_stack_depth_mode(config, state, ups_mode);
-    beta_mode = apply_stack_depth_mode(config, state, beta_mode);
-    ups_mode = apply_koppa_gate(config, state, ups_mode);
-    beta_mode = apply_koppa_gate(config, state, beta_mode);
-    
-    /* Prepare new values */
-    Rational new_upsilon, new_beta;
-    rational_init(&new_upsilon);
-    rational_init(&new_beta);
-    rational_set(&new_upsilon, &state->upsilon);
-    rational_set(&new_beta, &state->beta);
-    
-    /* Compute deltas from previous step */
-    rational_delta(&state->delta_upsilon, &state->upsilon, &state->previous_upsilon);
-    rational_delta(&state->delta_beta, &state->beta, &state->previous_beta);
-    
-    /* Check if using delta-add mode */
-    bool use_delta_add = (!config->dual_track_mode && 
-                          config->engine_mode == ENGINE_MODE_DELTA_ADD);
-    
-    if (use_delta_add) {
-        /* Delta-add: u' = u + Δu, b' = b + Δb */
-        rational_add(&new_upsilon, &state->upsilon, &state->delta_upsilon);
-        rational_add(&new_beta, &state->beta, &state->delta_beta);
-    } else {
-        /* Standard track mode formulas */
-        bool ups_success = apply_track_mode(ups_mode, &new_upsilon, 
-                                            &state->upsilon, &state->beta, &state->koppa);
-        bool beta_success = apply_track_mode(beta_mode, &new_beta, 
-                                             &state->beta, &state->upsilon, &state->koppa);
-        success = ups_success && beta_success;
+    Rational ratio;
+    rational_init(&ratio);
+    if (!rational_div(&ratio, &state->upsilon, &state->beta)) {
+        rational_clear(&ratio);
+        return false;
     }
     
-    /* Apply additional transformations */
-    apply_delta_cross(config, state, &new_upsilon, &new_beta);
-    apply_sign_flip(config, state, &new_upsilon, &new_beta);
-    update_triangle(config, state);
+    bool in_range = false;
     
-    /* Commit new values if successful */
-    if (success) {
-        rational_set(&state->upsilon, &new_upsilon);
-        rational_set(&state->beta, &new_beta);
-        state->dual_engine_last_step = config->dual_track_mode;
-        
-        /* Recompute deltas based on actual change */
-        rational_delta(&state->delta_upsilon, &state->upsilon, &ups_before);
-        rational_delta(&state->delta_beta, &state->beta, &beta_before);
-        
-        /* Update previous values */
-        rational_set(&state->previous_upsilon, &ups_before);
-        rational_set(&state->previous_beta, &beta_before);
-        
-        /* Apply modular wrap */
-        apply_modular_wrap(config, state);
+    if (config->ratio_trigger_mode == RATIO_TRIGGER_CUSTOM && 
+        config->enable_ratio_custom_range) {
+        /* Use custom bounds */
+        if (rational_cmp(&ratio, &config->ratio_custom_lower) > 0 &&
+            rational_cmp(&ratio, &config->ratio_custom_upper) < 0) {
+            in_range = true;
+        }
     } else {
-        state->dual_engine_last_step = false;
+        /* Use predefined bounds */
+        Rational lower, upper;
+        rational_init(&lower);
+        rational_init(&upper);
+        ratio_bounds(config->ratio_trigger_mode, &lower, &upper);
+        
+        if (rational_cmp(&ratio, &lower) > 0 &&
+            rational_cmp(&ratio, &upper) < 0) {
+            in_range = true;
+        }
+        
+        rational_clear(&lower);
+        rational_clear(&upper);
     }
     
-    /* Cleanup */
-    rational_clear(&ups_before);
-    rational_clear(&beta_before);
-    rational_clear(&new_upsilon);
-    rational_clear(&new_beta);
+    rational_clear(&ratio);
+    return in_range;
+}
+
+/* Check if υ/β ratio is outside threshold (extreme values) */
+static bool ratio_threshold_outside(const Config *config, const TRTS_State *state) {
+    if (!config->enable_ratio_threshold_psi) {
+        return false;
+    }
+    if (rational_is_zero(&state->beta)) {
+        return false;
+    }
     
-    return success;
+    Rational ratio;
+    rational_init(&ratio);
+    if (!rational_div(&ratio, &state->upsilon, &state->beta)) {
+        rational_clear(&ratio);
+        return false;
+    }
+    
+    /* FIX: Manual conversion from Rational struct to double */
+    double ratio_snapshot = 0.0;
+    if (mpz_sgn(ratio.den) != 0) {
+        ratio_snapshot = mpz_get_d(ratio.num) / mpz_get_d(ratio.den);
+    }
+    
+    rational_clear(&ratio);
+    
+    double magnitude = (ratio_snapshot >= 0.0) ? ratio_snapshot : -ratio_snapshot;
+    return (magnitude < 0.5 || magnitude > 2.0);
+}
+
+/* ========================================
+   PSI GATING CONDITIONS
+   ======================================== */
+
+/* Determine if psi should fire based on mode and conditions */
+static bool should_fire_psi(const Config *config, const TRTS_State *state,
+                            bool is_memory_step, bool allow_stack) {
+    if (!is_memory_step || !allow_stack) {
+        return false;
+    }
+    
+    switch (config->psi_mode) {
+        case PSI_MODE_MSTEP:
+            return true;
+        case PSI_MODE_RHO_ONLY:
+            return state->rho_pending;
+        case PSI_MODE_MSTEP_RHO:
+            return true;
+        case PSI_MODE_INHIBIT_RHO:
+            return !state->rho_pending;
+    }
+    
+    return false;
+}
+
+/* Check if stack depth allows psi firing */
+static bool stack_allows_psi(const Config *config, const TRTS_State *state) {
+    if (!config->enable_stack_depth_modes) {
+        return true;
+    }
+    /* Allow psi only at specific stack depths */
+    return (state->koppa_stack_size == 2 || state->koppa_stack_size == 4);
+}
+
+/* ========================================
+   OUTPUT HANDLING
+   ======================================== */
+
+typedef struct {
+    FILE *events_file;
+    FILE *values_file;
+} SimulationOutputs;
+
+/* Log event flags to CSV */
+static void log_event(FILE *events_file, size_t tick, int microtick, char phase,
+                      bool rho_event, bool psi_fired, bool mu_zero, bool forced_emission,
+                      const TRTS_State *state) {
+    fprintf(events_file,
+            "%zu,%d,%c,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
+            tick, microtick, phase,
+            rho_event ? 1 : 0, psi_fired ? 1 : 0, mu_zero ? 1 : 0,
+            forced_emission ? 1 : 0,
+            state->ratio_triggered_recent ? 1 : 0,
+            state->psi_triple_recent ? 1 : 0,
+            state->dual_engine_last_step ? 1 : 0,
+            state->koppa_sample_index,
+            state->ratio_threshold_recent ? 1 : 0,
+            state->psi_strength_applied ? 1 : 0,
+            state->sign_flip_polarity ? 1 : 0);
+}
+
+/* Log rational values to CSV */
+static void log_values(FILE *values_file, size_t tick, int microtick,
+                       const TRTS_State *state) {
+    
+    /* FIX: Use gmp_snprintf and fprintf to avoid linking issues */
+    #define LOG_BUFFER_SIZE 4096 
+    char log_buffer[LOG_BUFFER_SIZE];
+    
+    /* Use gmp_snprintf to format the entire string into the buffer */
+    /* FIX: Use .num and .den for all Rational members */
+    gmp_snprintf(log_buffer, LOG_BUFFER_SIZE,
+        "%zu,%d,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%zu,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd",
+        tick, microtick,
+        state->upsilon.num, state->upsilon.den,
+        state->beta.num, state->beta.den,
+        state->koppa.num, state->koppa.den,
+        state->koppa_sample.num, state->koppa_sample.den,
+        state->previous_upsilon.num, state->previous_upsilon.den,
+        state->previous_beta.num, state->previous_beta.den,
+        state->koppa_stack[0].num, state->koppa_stack[0].den,
+        state->koppa_stack[1].num, state->koppa_stack[1].den,
+        state->koppa_stack[2].num, state->koppa_stack[2].den,
+        state->koppa_stack[3].num, state->koppa_stack[3].den,
+        state->koppa_stack_size,
+        state->delta_upsilon.num, state->delta_upsilon.den,
+        state->delta_beta.num, state->delta_beta.den,
+        state->triangle_phi_over_epsilon.num, state->triangle_phi_over_epsilon.den,
+        state->triangle_prev_over_phi.num, state->triangle_prev_over_phi.den,
+        state->triangle_epsilon_over_prev.num, state->triangle_epsilon_over_prev.den);
+
+    /* Use standard C fprintf to write the result, adding the newline */
+    fprintf(values_file, "%s\n", log_buffer);
+}
+
+/* Emit outputs to files and/or observer */
+static void emit_outputs(const SimulationOutputs *outputs, size_t tick, int microtick,
+                         char phase, bool rho_event, bool psi_fired, bool mu_zero,
+                         bool forced_emission, const TRTS_State *state,
+                         SimulateObserver observer, void *user_data) {
+    if (outputs) {
+        if (outputs->events_file) {
+            log_event(outputs->events_file, tick, microtick, phase,
+                     rho_event, psi_fired, mu_zero, forced_emission, state);
+        }
+        if (outputs->values_file) {
+            log_values(outputs->values_file, tick, microtick, state);
+        }
+    }
+    
+    if (observer) {
+        observer(user_data, tick, microtick, phase, state,
+                rho_event, psi_fired, mu_zero, forced_emission);
+    }
+}
+
+/* ========================================
+   CORE SIMULATION LOOP
+   ======================================== */
+
+static void run_simulation(const Config *config, const SimulationOutputs *outputs,
+                           SimulateObserver observer, void *user_data) {
+    TRTS_State state;
+    state_init(&state);
+    state_reset(&state, config);
+    
+    /* Run for configured number of ticks */
+    for (size_t tick = 1; tick <= config->ticks; ++tick) {
+        state.tick = tick;
+        
+        /* 11 microticks per tick */
+        for (int microtick = 1; microtick <= 11; ++microtick) {
+            /* Determine phase */
+            char phase;
+            switch (microtick) {
+                case 1: case 4: case 7: case 10:
+                    phase = 'E';  /* Epsilon phase */
+                    break;
+                case 2: case 5: case 8: case 11:
+                    phase = 'M';  /* Memory phase */
+                    break;
+                default:
+                    phase = 'R';  /* Reset phase */
+                    break;
+            }
+            
+            /* Initialize event flags */
+            bool rho_event = false;
+            bool psi_fired = false;
+            bool mu_zero = false;
+            bool forced_emission = false;
+            
+            /* Clear per-microtick flags */
+            state.ratio_triggered_recent = false;
+            state.psi_triple_recent = false;
+            state.dual_engine_last_step = false;
+            state.koppa_sample_index = -1;
+            rational_set(&state.koppa_sample, &state.koppa);
+            state.ratio_threshold_recent = false;
+            state.psi_strength_applied = false;
+            
+            /* Execute phase logic */
+            switch (phase) {
+                case 'E': {
+                    /* Epsilon phase: compute ε and run engine */
+                    rational_set(&state.epsilon, &state.upsilon);
+                    (void)engine_step(config, &state, microtick);
+                    
+                    /* Check for patterns in new upsilon */
+                    /* FIX: Replaced with enum from config.h */
+                    if (config->prime_target == PRIME_ON_CURRENT) { /* Was PRIME_ON_NEW_UPSILON */
+                        /* FIX: Pass address of struct */
+                        if (mpq_has_pattern_component(config, &state.upsilon, true, false)) {
+                            state.rho_pending = true;
+                            rho_event = true;
+                        }
+                    }
+                    
+                    /* Microtick 10 special behavior */
+                    forced_emission = (microtick == 10);
+                    if (microtick == 10 && config->mt10_behavior == MT10_FORCED_PSI) {
+                        state.rho_pending = true;
+                        rho_event = true;
+                    }
+                    break;
+                }
+                
+                case 'M': {
+                    /* Memory phase: pattern check, psi decision, koppa accrue */
+                    mu_zero = rational_is_zero(&state.beta);
+                    
+                    /* Check for patterns in memory (beta) */
+                    if (config->prime_target == PRIME_ON_MEMORY) {
+                        /* FIX: Pass address of struct */
+                        if (mpq_has_pattern_component(config, &state.beta, true, true)) {
+                            state.rho_pending = true;
+                            rho_event = true;
+                        }
+                    }
+                    
+                    /* Determine if psi should fire */
+                    bool allow_stack = stack_allows_psi(config, &state);
+                    bool request_psi = should_fire_psi(config, &state, true, allow_stack);
+                    
+                    /* Check ratio triggers */
+                    bool ratio_triggered = ratio_in_range(config, &state);
+                    if (ratio_triggered) {
+                        request_psi = true;
+                        state.ratio_triggered_recent = true;
+                    }
+                    
+                    bool ratio_threshold = ratio_threshold_outside(config, &state);
+                    if (ratio_threshold) {
+                        request_psi = true;
+                        state.ratio_threshold_recent = true;
+                    }
+                    
+                    /* Fire psi if conditions met */
+                    if (request_psi && allow_stack) {
+                        psi_fired = psi_transform(config, &state);
+                    } else {
+                        state.psi_recent = false;
+                    }
+                    
+                    /* Accrue koppa and reset rho latch */
+                    koppa_accrue(config, &state, psi_fired, true, microtick);
+                    state.rho_latched = false;
+                    break;
+                }
+                
+                case 'R': {
+                    /* Reset phase: accrue koppa without psi */
+                    koppa_accrue(config, &state, false, false, microtick);
+                    state.psi_recent = false;
+                    state.rho_latched = false;
+                    break;
+                }
+            }
+            
+            /* Emit outputs */
+            emit_outputs(outputs, tick, microtick, phase, rho_event,
+                        psi_fired, mu_zero, forced_emission, &state,
+                        observer, user_data);
+        }
+    }
+    
+    state_clear(&state);
+}
+
+/* ========================================
+   PUBLIC API
+   ======================================== */
+
+void simulate(const Config *config) {
+    FILE *events_file = fopen("events.csv", "w");
+    if (!events_file) {
+        perror("events.csv");
+        return;
+    }
+    
+    FILE *values_file = fopen("values.csv", "w");
+    if (!values_file) {
+        perror("values.csv");
+        fclose(events_file);
+        return;
+    }
+    
+    /* Write CSV headers */
+    fprintf(events_file,
+            "tick,mt,phase,rho_event,psi_fired,mu_zero,forced_emission,"
+            "ratio_triggered,triple_psi,dual_engine,koppa_sample_index,"
+            "ratio_threshold,psi_strength,sign_flip\n");
+    
+    fprintf(values_file,
+            "tick,mt,upsilon_num,upsilon_den,beta_num,beta_den,koppa_num,koppa_den,"
+            "koppa_sample_num,koppa_sample_den,prev_upsilon_num,prev_upsilon_den,"
+            "prev_beta_num,prev_beta_den,koppa_stack0_num,koppa_stack0_den,"
+            "koppa_stack1_num,koppa_stack1_den,koppa_stack2_num,koppa_stack2_den,"
+            "koppa_stack3_num,koppa_stack3_den,koppa_stack_size,delta_upsilon_num,"
+            "delta_upsilon_den,delta_beta_num,delta_beta_den,triangle_phi_over_epsilon_num,"
+            "triangle_phi_over_epsilon_den,triangle_prev_over_phi_num,"
+            "triangle_prev_over_phi_den,triangle_epsilon_over_prev_num,"
+            "triangle_epsilon_over_prev_den\n");
+    
+    SimulationOutputs sim_outputs = {events_file, values_file};
+    run_simulation(config, &sim_outputs, NULL, NULL);
+    
+    fclose(events_file);
+    fclose(values_file);
+}
+
+void simulate_stream(const Config *config, SimulateObserver observer, void *user_data) {
+    run_simulation(config, NULL, observer, user_data);
 }

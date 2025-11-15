@@ -73,7 +73,7 @@ int rational_sgn(const Rational *q);
 /* Test if numerator is zero (which implies denominator is also zero) */
 bool rational_is_zero(const Rational *q);
 
-/* Test if denominator is zero (undefined state) */
+/* Test if denominator is zero (which implies numerator is also zero) */
 bool rational_denominator_zero(const Rational *q);
 
 #endif /* TRTS_RATIONAL_H */

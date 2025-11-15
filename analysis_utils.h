@@ -22,7 +22,8 @@
 /* Run summary containing all collected statistics */
 typedef struct {
     /* Final ratio */
-    mpq_t final_ratio;                  /* Last observed υ/β ratio */
+    // FIX: Changed mpq_t to Rational for consistency with rational.h functions
+    Rational final_ratio;                  /* Last observed υ/β ratio */
     bool ratio_defined;                 /* True if ratio was computable */
     char final_ratio_str[128];          /* String representation "N/D" */
     
@@ -36,21 +37,16 @@ typedef struct {
     char classification[64];            /* Detailed classification string */
     
     /* Stack statistics */
-    char stack_summary[128];            /* Stack depth distribution */
-    size_t stack_histogram[8];          /* Histogram of stack depths */
-    double average_stack_depth;
+    char stack_summary[128];            /* Summary of κ stack contents */
+    size_t stack_max_depth;             /* Maximum κ stack depth reached */
     
-    /* Snapshots (for analysis only - not used in propagation) */
-    double final_ratio_snapshot;        /* Double approximation of ratio */
+    /* Engine statistics */
+    size_t engine_step_count;           /* Number of successful engine steps */
+    size_t koppa_sample_count;          /* Number of koppa samples taken */
     
-    /* Counts */
-    size_t total_samples;               /* Number of microticks observed */
-    size_t total_ticks;                 /* Number of ticks simulated */
-    size_t psi_events;                  /* Count of ψ fires */
-    size_t rho_events;                  /* Count of ρ triggers */
-    size_t mu_zero_events;              /* Count of μ=0 events */
-    
-    /* Psi spacing statistics */
+    /* Psi firing statistics */
+    size_t psi_fire_count;              /* Total number of ψ fires */
+    size_t psi_triple_count;            /* Number of triple ψ fires */
     double psi_spacing_mean;            /* Mean microticks between ψ fires */
     double psi_spacing_stddev;          /* Std dev of spacing */
     

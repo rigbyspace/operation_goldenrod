@@ -24,18 +24,18 @@ static bool standard_psi(TRTS_State *st) {
     mpz_init(t1);
     mpz_init(t2);
     
-    mpz_mul(t1, mpq_numref(st->beta), mpq_denref(st->upsilon));
-    mpz_mul(t2, mpq_denref(st->beta), mpq_numref(st->upsilon));
+    mpz_mul(t1, st->beta.num, st->upsilon.den);
+    mpz_mul(t2, st->beta.den, st->upsilon.num);
     rational_set_components(&new_u, t1, t2);
     
     /* new_b = υ/β = (υ.num * β.den) / (υ.den * β.num) */
-    mpz_mul(t1, mpq_numref(st->upsilon), mpq_denref(st->beta));
-    mpz_mul(t2, mpq_denref(st->upsilon), mpq_numref(st->beta));
+    mpz_mul(t1, st->upsilon.num, st->beta.den);
+    mpz_mul(t2, st->upsilon.den, st->beta.num);
     rational_set_components(&new_b, t1, t2);
     
     /* Check for zero denominators */
     bool ok = true;
-    if (mpz_sgn(mpq_denref(new_u)) == 0 || mpz_sgn(mpq_denref(new_b)) == 0) {
+    if (mpz_sgn(new_u.den) == 0 || mpz_sgn(new_b.den) == 0) {
         ok = false;
     }
     
@@ -71,25 +71,25 @@ static bool triple_psi(TRTS_State *st) {
     mpz_init(t2);
     
     /* new_u = β/κ */
-    mpz_mul(t1, mpq_numref(st->beta), mpq_denref(st->koppa));
-    mpz_mul(t2, mpq_denref(st->beta), mpq_numref(st->koppa));
+    mpz_mul(t1, st->beta.num, st->koppa.den);
+    mpz_mul(t2, st->beta.den, st->koppa.num);
     rational_set_components(&new_u, t1, t2);
     
     /* new_b = κ/υ */
-    mpz_mul(t1, mpq_numref(st->koppa), mpq_denref(st->upsilon));
-    mpz_mul(t2, mpq_denref(st->koppa), mpq_numref(st->upsilon));
+    mpz_mul(t1, st->koppa.num, st->upsilon.den);
+    mpz_mul(t2, st->koppa.den, st->upsilon.num);
     rational_set_components(&new_b, t1, t2);
     
     /* new_k = κ/β */
-    mpz_mul(t1, mpq_numref(st->koppa), mpq_denref(st->beta));
-    mpz_mul(t2, mpq_denref(st->koppa), mpq_numref(st->beta));
+    mpz_mul(t1, st->koppa.num, st->beta.den);
+    mpz_mul(t2, st->koppa.den, st->beta.num);
     rational_set_components(&new_k, t1, t2);
     
     /* Check for zero denominators */
     bool ok = true;
-    if (mpz_sgn(mpq_denref(new_u)) == 0 || 
-        mpz_sgn(mpq_denref(new_b)) == 0 || 
-        mpz_sgn(mpq_denref(new_k)) == 0) {
+   if (mpz_sgn(new_u.den) == 0 || 
+       mpz_sgn(new_b.den) == 0 || 
+       mpz_sgn(new_k.den) == 0) {
         ok = false;
     }
     
@@ -115,19 +115,19 @@ static int prime_count(const TRTS_State *st) {
     mpz_init(m);
     
     /* Check upsilon numerator */
-    mpz_abs(m, mpq_numref(st->upsilon));
+    mpz_abs(m, st->upsilon.num);
     if (mpz_cmp_ui(m, 2UL) >= 0 && mpz_probab_prime_p(m, 25) > 0) {
         count++;
     }
     
     /* Check beta numerator */
-    mpz_abs(m, mpq_numref(st->beta));
+    mpz_abs(m, st->beta.num);
     if (mpz_cmp_ui(m, 2UL) >= 0 && mpz_probab_prime_p(m, 25) > 0) {
         count++;
     }
     
     /* Check koppa numerator */
-    mpz_abs(m, mpq_numref(st->koppa));
+    mpz_abs(m, st->koppa.num);
     if (mpz_cmp_ui(m, 2UL) >= 0 && mpz_probab_prime_p(m, 25) > 0) {
         count++;
     }

@@ -37,84 +37,79 @@ typedef enum {
 
 /* Koppa (κ) operation mode */
 typedef enum {
-    KOPPA_MODE_DUMP,       /* κ ← 0 */
-    KOPPA_MODE_POP,        /* κ ← ε */
-    KOPPA_MODE_ACCUMULATE  /* κ ← κ + ε */
+    KOPPA_MODE_DUMP,       /* κ is dumped after use (κ=0/1) */
+    KOPPA_MODE_POP,        /* κ is replaced by epsilon (κ=ε)  <-- ADDED */
+    KOPPA_MODE_ACCUMULATE  /* κ accumulates changes (κ=κ+change) */
 } KoppaMode;
 
-/* Koppa trigger: when to execute koppa operation */
+/* Koppa (κ) trigger condition */
 typedef enum {
-    KOPPA_ON_PSI,          /* Trigger only on ψ fire */
-    KOPPA_ON_MU_AFTER_PSI, /* Trigger on memory step after ψ */
-    KOPPA_ON_ALL_MU        /* Trigger on all memory steps */
+    KOPPA_ON_PSI,          /* Trigger κ update only when ψ fires */
+    KOPPA_ON_MSTEP,        /* Trigger κ update on every memory step */
+    KOPPA_ON_ALL_MU,       /* Trigger κ update on all microsteps (µ) */
+    KOPPA_ON_MU_AFTER_PSI  /* Trigger κ update on microsteps after ψ fire until next ψ  <-- ADDED */
 } KoppaTrigger;
 
-/* Prime target: which value to check for patterns */
+/* Prime target: determines which rational components are checked for primality */
 typedef enum {
-    PRIME_ON_MEMORY,       /* Check β numerator/denominator */
-    PRIME_ON_NEW_UPSILON   /* Check υ numerator after engine step */
+    PRIME_ON_MEMORY,       /* Check previous numerators/denominators (default) */
+    PRIME_ON_DELTA,        /* Check delta numerators/denominators */
+    PRIME_ON_CURRENT,      /* Check current numerators/denominators */
+    PRIME_ON_KOPPA         /* Check koppa numerator/denominator */
 } PrimeTarget;
 
-/* Microtick 10 behavior */
+/* MT10 behavior: control over microtick 10 */
 typedef enum {
-    MT10_FORCED_EMISSION_ONLY,  /* Only emit, no special behavior */
-    MT10_FORCED_PSI,            /* Force ρ pending (triggers ψ) */
-    MT10_FORCED_ENGINE,         /* Force extra engine step */
-    MT10_FORCED_KOPPA           /* Force koppa operation */
-} Mt10Behavior;
+    MT10_NONE,             /* Normal engine step at MT10 */
+    MT10_FORCED_PSI,       /* Force ψ transform at MT10 */
+    MT10_BLOCK_PSI         /* Block ψ transform at MT10 */
+} MT10Behavior;
 
-/* Sign-flip mode */
+/* Sign flip behavior: when to flip the sign of υ/β */
 typedef enum {
-    SIGN_FLIP_NONE,        /* No sign flipping */
-    SIGN_FLIP_ALWAYS,      /* Flip sign every step */
-    SIGN_FLIP_ALTERNATE    /* Alternate flipping based on polarity */
+    SIGN_FLIP_NONE,        /* No sign flip */
+    SIGN_FLIP_ON_PRIME,    /* Flip sign when a prime is detected in target */
+    SIGN_FLIP_ON_RATIO,    /* Flip sign when ratio trigger fires */
+    SIGN_FLIP_ON_PSI       /* Flip sign when psi fires */
 } SignFlipMode;
 
-/* Ratio trigger mode (for ρ activation based on υ/β ratio) */
+/* Ratio trigger modes: conditions for setting rho_pending */
 typedef enum {
-    RATIO_TRIGGER_NONE,    /* No ratio trigger */
-    RATIO_TRIGGER_GOLDEN,  /* Trigger near golden ratio */
-    RATIO_TRIGGER_SQRT2,   /* Trigger near √2 */
-    RATIO_TRIGGER_PLASTIC, /* Trigger near plastic constant */
-    RATIO_TRIGGER_CUSTOM   /* Use custom range */
+    RATIO_TRIGGER_NONE,    /* No ratio-based trigger */
+    RATIO_TRIGGER_PHI,     /* Trigger if |υ/β| equals ϕ (Golden Ratio) */
+    RATIO_TRIGGER_RHO,     /* Trigger if |υ/β| equals ρ (Plastic Constant) */
+    RATIO_TRIGGER_SILVER,  /* Trigger if |υ/β| equals δs (Silver Ratio) */
+    RATIO_TRIGGER_CUSTOM   /* Trigger if |υ/β| is within a custom range */
 } RatioTriggerMode;
 
-/* Configuration structure
- *
- * Contains all parameters controlling TRTS runtime behavior.
- * Separated into:
- * - Mode enumerations
- * - Feature flags (boolean enables)
- * - Rational seeds
- * - Numeric parameters
- */
-typedef struct Config_s {
-    /* Core modes */
-    EngineMode engine_mode;
-    EngineTrackMode engine_upsilon;
-    EngineTrackMode engine_beta;
-    PsiMode psi_mode;
-    KoppaMode koppa_mode;
-    KoppaTrigger koppa_trigger;
-    PrimeTarget prime_target;
-    Mt10Behavior mt10_behavior;
-    SignFlipMode sign_flip_mode;
-    RatioTriggerMode ratio_trigger_mode;
-    
+
+/* Master configuration structure */
+typedef struct {
+    /* Modes */
+    EngineMode engine_mode;                  /* Default track modes */
+    EngineTrackMode engine_upsilon;          /* Track mode for υ' = f(υ,β,κ) */
+    EngineTrackMode engine_beta;             /* Track mode for β' = f(β,υ,κ) */
+    PsiMode psi_mode;                       /* Trigger condition for ψ */
+    KoppaMode koppa_mode;                   /* Operation for κ (DUMP/POP/ACCUMULATE) */
+    KoppaTrigger koppa_trigger;             /* Trigger condition for κ operation */
+    PrimeTarget prime_target;               /* Which components to check for primes */
+    MT10Behavior mt10_behavior;             /* Behavior at microtick 10 */
+    SignFlipMode sign_flip_mode;             /* When to apply sign flip */
+    RatioTriggerMode ratio_trigger_mode;     /* When to set rho_pending based on ratio */
+
     /* Feature flags */
-    bool dual_track_mode;                    /* Independent υ/β track modes */
-    bool triple_psi_mode;                    /* Use 3-way ψ transform */
-    bool multi_level_koppa;                  /* Enable 4-level κ stack */
-    bool enable_asymmetric_cascade;          /* Asymmetric track modes per microtick */
-    bool enable_conditional_triple_psi;      /* Trigger 3-way ψ on 3+ primes */
-    bool enable_koppa_gated_engine;          /* Modulate track mode by |κ| */
-    bool enable_delta_cross_propagation;     /* Cross-couple Δυ and Δβ */
-    bool enable_delta_koppa_offset;          /* Add κ to delta cross */
-    bool enable_ratio_threshold_psi;         /* Trigger ψ on extreme υ/β ratios */
-    bool enable_stack_depth_modes;           /* Modulate track by stack depth */
-    bool enable_epsilon_phi_triangle;        /* Compute ε/φ triangle ratios */
-    bool enable_sign_flip;                   /* Enable sign flipping */
-    bool enable_modular_wrap;                /* Wrap κ modulo β when large */
+    bool dual_track_mode;                    /* Use dual track modes (upsilon/beta) */
+    bool triple_psi_mode;                    /* Use 3-way ψ (υ,β,κ) → (β/κ, κ/υ, κ/β) */
+    bool multi_level_koppa;                  /* Enable 4-level koppa stack */
+    bool enable_asymmetric_cascade;          /* Use different track modes per microtick */
+    bool enable_conditional_triple_psi;      /* Force triple ψ if 3+ primes found */
+    bool enable_koppa_gated_engine;          /* Gate engine steps based on κ value */
+    bool enable_delta_cross_propagation;     /* Cross-propagate deltas */
+    bool enable_delta_koppa_offset;          /* κ = κ + Δυ + Δβ */
+    bool enable_ratio_threshold_psi;         /* ψ is blocked if ratio < threshold */
+    bool enable_stack_depth_modes;           /* Use stack depth to modify engine */
+    bool enable_epsilon_phi_swap;            /* Swap ε with ϕ (golden ratio) on trigger */
+    bool enable_beta_mod_koppa_wrap;         /* Wrap κ modulo β when large */
     bool enable_psi_strength_parameter;      /* Multiple ψ fires based on primes */
     bool enable_ratio_custom_range;          /* Use custom ratio trigger bounds */
     bool enable_twin_prime_trigger;          /* Check for twin primes */
@@ -123,22 +118,22 @@ typedef struct Config_s {
     bool enable_ratio_snapshot_logging;      /* Log ratio snapshots (analysis) */
     bool enable_feedback_oscillator;         /* Feedback oscillation mode */
     bool enable_fibonacci_gate;              /* Fibonacci gating */
-    
+
     /* Simulation parameters */
     size_t ticks;                            /* Number of ticks to simulate */
-    
+
     /* Initial seeds (rational) */
     Rational initial_upsilon;
     Rational initial_beta;
     Rational initial_koppa;
-    
+
     /* Custom ratio range (for RATIO_TRIGGER_CUSTOM) */
     Rational ratio_custom_lower;
     Rational ratio_custom_upper;
-    
+
     /* Modular wrap threshold */
     unsigned long koppa_wrap_threshold;      /* Wrap κ when |κ| exceeds this */
-    
+
     /* Modulus bound (for reducing numerators) */
     mpz_t modulus_bound;                     /* Reduce numerators mod this value */
 } Config;

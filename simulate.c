@@ -85,12 +85,12 @@ static bool mpz_is_perfect_power(mpz_srcptr value) {
 }
 
 /* Check if rational has pattern components in numerator and/or denominator */
-static bool mpq_has_pattern_component(const Config *config, mpq_srcptr value,
+static bool mpq_has_pattern_component(const Config *config, const Rational *value,
                                        bool check_num, bool check_den) {
     bool found = false;
     
     if (check_num) {
-        mpz_srcptr num = mpq_numref(value);
+        mpz_srcptr num = value->num; 
         
         /* Prime check */
         if (mpz_is_prime_signed(num)) {
@@ -139,7 +139,7 @@ static bool mpq_has_pattern_component(const Config *config, mpq_srcptr value,
     }
     
     if (check_den) {
-        mpz_srcptr den = mpq_denref(value);
+        mpz_srcptr den = value->den; 
         
         if (mpz_is_prime_signed(den)) {
             found = true;
@@ -244,8 +244,12 @@ static bool ratio_threshold_outside(const Config *config, const TRTS_State *stat
         return false;
     }
     
-    /* Convert to double for threshold check (evaluation only) */
-    double ratio_snapshot = mpq_get_d(ratio);
+    /* Manual conversion from Rational struct to double */
+    double ratio_snapshot = 0.0;
+    if (mpz_sgn(ratio.den) != 0) {
+        ratio_snapshot = mpz_get_d(ratio.num) / mpz_get_d(ratio.den);
+    }
+    
     rational_clear(&ratio);
     
     double magnitude = (ratio_snapshot >= 0.0) ? ratio_snapshot : -ratio_snapshot;
@@ -316,25 +320,36 @@ static void log_event(FILE *events_file, size_t tick, int microtick, char phase,
 /* Log rational values to CSV */
 static void log_values(FILE *values_file, size_t tick, int microtick,
                        const TRTS_State *state) {
-    gmp_fprintf(values_file,
-        "%zu,%d,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%zu,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd\n",
+    
+    /* FIX: Replaced gmp_fprintf with gmp_snprintf followed by fprintf
+     * This avoids the implicit declaration/linking error for gmp_fprintf
+     * and is a highly portable solution. Buffer size is estimated to be large enough. */
+    #define LOG_BUFFER_SIZE 4096 
+    char log_buffer[LOG_BUFFER_SIZE];
+    
+    /* Use gmp_snprintf to format the entire string into the buffer */
+    gmp_snprintf(log_buffer, LOG_BUFFER_SIZE,
+        "%zu,%d,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%zu,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd,%Zd",
         tick, microtick,
-        mpq_numref(state->upsilon), mpq_denref(state->upsilon),
-        mpq_numref(state->beta), mpq_denref(state->beta),
-        mpq_numref(state->koppa), mpq_denref(state->koppa),
-        mpq_numref(state->koppa_sample), mpq_denref(state->koppa_sample),
-        mpq_numref(state->previous_upsilon), mpq_denref(state->previous_upsilon),
-        mpq_numref(state->previous_beta), mpq_denref(state->previous_beta),
-        mpq_numref(state->koppa_stack[0]), mpq_denref(state->koppa_stack[0]),
-        mpq_numref(state->koppa_stack[1]), mpq_denref(state->koppa_stack[1]),
-        mpq_numref(state->koppa_stack[2]), mpq_denref(state->koppa_stack[2]),
-        mpq_numref(state->koppa_stack[3]), mpq_denref(state->koppa_stack[3]),
+        state->upsilon.num, state->upsilon.den,
+        state->beta.num, state->beta.den,
+        state->koppa.num, state->koppa.den,
+        state->koppa_sample.num, state->koppa_sample.den,
+        state->previous_upsilon.num, state->previous_upsilon.den,
+        state->previous_beta.num, state->previous_beta.den,
+        state->koppa_stack[0].num, state->koppa_stack[0].den,
+        state->koppa_stack[1].num, state->koppa_stack[1].den,
+        state->koppa_stack[2].num, state->koppa_stack[2].den,
+        state->koppa_stack[3].num, state->koppa_stack[3].den,
         state->koppa_stack_size,
-        mpq_numref(state->delta_upsilon), mpq_denref(state->delta_upsilon),
-        mpq_numref(state->delta_beta), mpq_denref(state->delta_beta),
-        mpq_numref(state->triangle_phi_over_epsilon), mpq_denref(state->triangle_phi_over_epsilon),
-        mpq_numref(state->triangle_prev_over_phi), mpq_denref(state->triangle_prev_over_phi),
-        mpq_numref(state->triangle_epsilon_over_prev), mpq_denref(state->triangle_epsilon_over_prev));
+        state->delta_upsilon.num, state->delta_upsilon.den,
+        state->delta_beta.num, state->delta_beta.den,
+        state->triangle_phi_over_epsilon.num, state->triangle_phi_over_epsilon.den,
+        state->triangle_prev_over_phi.num, state->triangle_prev_over_phi.den,
+        state->triangle_epsilon_over_prev.num, state->triangle_epsilon_over_prev.den);
+
+    /* Use standard C fprintf to write the result, adding the newline */
+    fprintf(values_file, "%s\n", log_buffer);
 }
 
 /* Emit outputs to files and/or observer */
@@ -412,7 +427,7 @@ static void run_simulation(const Config *config, const SimulationOutputs *output
                     
                     /* Check for patterns in new upsilon */
                     if (config->prime_target == PRIME_ON_NEW_UPSILON) {
-                        if (mpq_has_pattern_component(config, state.upsilon, true, false)) {
+                        if (mpq_has_pattern_component(config, &state.upsilon, true, false)) {
                             state.rho_pending = true;
                             rho_event = true;
                         }
@@ -433,7 +448,7 @@ static void run_simulation(const Config *config, const SimulationOutputs *output
                     
                     /* Check for patterns in memory (beta) */
                     if (config->prime_target == PRIME_ON_MEMORY) {
-                        if (mpq_has_pattern_component(config, state.beta, true, true)) {
+                        if (mpq_has_pattern_component(config, &state.beta, true, true)) {
                             state.rho_pending = true;
                             rho_event = true;
                         }

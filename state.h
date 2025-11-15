@@ -12,14 +12,15 @@
 #include "rational.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include "config.h"
 
-/* Forward declaration */
+/* Forward declaration 
 typedef struct Config_s Config;
 
-/* TRTS Runtime State
- *
- * Contains:
- * - Primary registers: upsilon (υ), beta (β), koppa (κ)
+TRTS Runtime State
+ 
+ Contains:
+  - Primary registers: upsilon (υ), beta (β), koppa (κ)
  * - Supplementary registers: epsilon (ε), phi (φ)
  * - Previous values for delta computation
  * - Delta values (change from previous step)

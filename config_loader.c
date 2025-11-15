@@ -185,8 +185,9 @@ static bool json_extract_string(const char *json, const char *key,
     return false;
 }
 
-/* Parse rational string "N/D" into mpq_t */
-static bool parse_rational_string(const char *text, mpq_t value) {
+/* Parse rational string "N/D" into a Rational struct */
+/* FIX: Changed mpq_t value to Rational *value for type compatibility */
+static bool parse_rational_string(const char *text, Rational *value) { 
     if (!text || !value) {
         return false;
     }
@@ -230,7 +231,8 @@ static bool parse_rational_string(const char *text, mpq_t value) {
         return false;
     }
     
-    rational_set_components(value, numz, denz);
+    /* The value is now Rational *, which matches rational_set_components */
+    rational_set_components(value, numz, denz); 
     
     mpz_clear(numz);
     mpz_clear(denz);
@@ -397,7 +399,8 @@ bool config_load_from_file(Config *config, const char *path,
     /* Parse rational seeds */
     char rational_buffer[256];
     if (json_extract_string(json, "upsilon_seed", rational_buffer, sizeof(rational_buffer))) {
-        if (!parse_rational_string(rational_buffer, config->initial_upsilon)) {
+        /* FIX: Pass address (&) of the Rational struct */
+        if (!parse_rational_string(rational_buffer, &config->initial_upsilon)) {
             write_error(error_buffer, error_capacity, "Invalid upsilon seed");
             free(buffer);
             return false;
@@ -405,7 +408,8 @@ bool config_load_from_file(Config *config, const char *path,
     }
     
     if (json_extract_string(json, "beta_seed", rational_buffer, sizeof(rational_buffer))) {
-        if (!parse_rational_string(rational_buffer, config->initial_beta)) {
+        /* FIX: Pass address (&) of the Rational struct */
+        if (!parse_rational_string(rational_buffer, &config->initial_beta)) {
             write_error(error_buffer, error_capacity, "Invalid beta seed");
             free(buffer);
             return false;
@@ -413,7 +417,8 @@ bool config_load_from_file(Config *config, const char *path,
     }
     
     if (json_extract_string(json, "koppa_seed", rational_buffer, sizeof(rational_buffer))) {
-        if (!parse_rational_string(rational_buffer, config->initial_koppa)) {
+        /* FIX: Pass address (&) of the Rational struct */
+        if (!parse_rational_string(rational_buffer, &config->initial_koppa)) {
             write_error(error_buffer, error_capacity, "Invalid koppa seed");
             free(buffer);
             return false;
@@ -422,7 +427,8 @@ bool config_load_from_file(Config *config, const char *path,
     
     /* Parse custom ratio bounds */
     if (json_extract_string(json, "ratio_custom_lower", rational_buffer, sizeof(rational_buffer))) {
-        if (!parse_rational_string(rational_buffer, config->ratio_custom_lower)) {
+        /* FIX: Pass address (&) of the Rational struct */
+        if (!parse_rational_string(rational_buffer, &config->ratio_custom_lower)) {
             write_error(error_buffer, error_capacity, "Invalid ratio_custom_lower");
             free(buffer);
             return false;
@@ -430,7 +436,8 @@ bool config_load_from_file(Config *config, const char *path,
     }
     
     if (json_extract_string(json, "ratio_custom_upper", rational_buffer, sizeof(rational_buffer))) {
-        if (!parse_rational_string(rational_buffer, config->ratio_custom_upper)) {
+        /* FIX: Pass address (&) of the Rational struct */
+        if (!parse_rational_string(rational_buffer, &config->ratio_custom_upper)) {
             write_error(error_buffer, error_capacity, "Invalid ratio_custom_upper");
             free(buffer);
             return false;

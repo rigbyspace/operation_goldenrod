@@ -30,9 +30,10 @@ void config_init(Config *cfg) {
     cfg->enable_delta_koppa_offset = false;
     cfg->enable_ratio_threshold_psi = false;
     cfg->enable_stack_depth_modes = false;
-    cfg->enable_epsilon_phi_triangle = false;
-    cfg->enable_sign_flip = false;
-    cfg->enable_modular_wrap = false;
+    
+    /* Corrected and updated boolean flags */
+    cfg->enable_epsilon_phi_swap = false;            /* Corrected from enable_epsilon_phi_triangle */
+    cfg->enable_beta_mod_koppa_wrap = false;         /* Replaces enable_modular_wrap */
     cfg->enable_psi_strength_parameter = false;
     cfg->enable_ratio_custom_range = false;
     cfg->enable_twin_prime_trigger = false;
@@ -70,13 +71,10 @@ void config_init(Config *cfg) {
 }
 
 void config_clear(Config *cfg) {
-    /* Clear all rational seeds */
     rational_clear(&cfg->initial_upsilon);
     rational_clear(&cfg->initial_beta);
     rational_clear(&cfg->initial_koppa);
     rational_clear(&cfg->ratio_custom_lower);
     rational_clear(&cfg->ratio_custom_upper);
-    
-    /* Clear modulus bound */
     mpz_clear(cfg->modulus_bound);
 }
